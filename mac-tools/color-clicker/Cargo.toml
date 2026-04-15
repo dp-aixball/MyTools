@@ -3,6 +3,7 @@ name = "color-clicker"
 version = "0.1.0"
 edition = "2021"
 description = "悬浮框颜色检测自动点击工具"
+license = "MIT"
 
 [dependencies]
 # GUI 框架
