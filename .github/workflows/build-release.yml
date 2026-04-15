@@ -1,0 +1,136 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-apple-darwin,aarch64-apple-darwin
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build (Intel)
+      run: |
+        cd mac-tools/color-clicker
+        cargo build --release --target x86_64-apple-darwin
+    
+    - name: Build (Apple Silicon)
+      run: |
+        cd mac-tools/color-clicker
+        cargo build --release --target aarch64-apple-darwin
+    
+    - name: Create Universal Binary
+      run: |
+        cd mac-tools/color-clicker
+        lipo -create \
+          target/x86_64-apple-darwin/release/color-clicker \
+          target/aarch64-apple-darwin/release/color-clicker \
+          -output target/color-clicker-universal
+        chmod +x target/color-clicker-universal
+    
+    - name: Create DMG Package
+      run: |
+        cd mac-tools/color-clicker
+        mkdir -p dist
+        cp target/color-clicker-universal dist/color-clicker
+        cp config.json dist/
+        cp README.md dist/
+        
+        # 创建 DMG
+        hdiutil create -volname "Color Clicker" \
+          -srcfolder dist \
+          -ov -format UDZO \
+          color-clicker-${{ github.ref_name }}-macos.dmg
+    
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: color-clicker-macos
+        path: mac-tools/color-clicker/color-clicker-${{ github.ref_name }}-macos.dmg
+  
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+          libxkbcommon-dev libssl-dev libgtk-3-dev
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build
+      run: |
+        cd mac-tools/color-clicker
+        cargo build --release
+    
+    - name: Create tarball
+      run: |
+        cd mac-tools/color-clicker
+        mkdir -p dist
+        cp target/release/color-clicker dist/
+        cp config.json dist/
+        cp README.md dist/
+        
+        tar -czf color-clicker-${{ github.ref_name }}-linux.tar.gz -C dist .
+    
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: color-clicker-linux
+        path: mac-tools/color-clicker/color-clicker-${{ github.ref_name }}-linux.tar.gz
+  
+  release:
+    needs: [build-macos, build-ubuntu]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          color-clicker-macos/*.dmg
+          color-clicker-linux/*.tar.gz
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
