@@ -1,0 +1,35 @@
+[package]
+name = "color-clicker"
+version = "0.1.0"
+edition = "2021"
+description = "悬浮框颜色检测自动点击工具 (Windows)"
+license = "MIT"
+
+[dependencies]
+# GUI 框架
+eframe = "0.28"
+egui = "0.28"
+
+# 屏幕捕获 (Windows)
+screenshots = "0.8"
+
+# 鼠标控制
+enigo = "0.2"
+
+# 配置序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 异步运行时
+tokio = { version = "1.0", features = ["full"] }
+
+# 时间处理
+chrono = "0.4"
+
+# 日志
+log = "0.4"
+env_logger = "0.11"
+
+# Windows API
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }

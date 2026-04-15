@@ -1,0 +1,5 @@
+/target
+.DS_Store
+# 保留默认配置，忽略用户自定义配置
+!config.json
+config.local.json

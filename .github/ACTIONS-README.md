@@ -26,35 +26,57 @@ git push origin v0.1.0
 ### macOS
 - **文件**: `color-clicker-v0.1.0-macos.dmg`
 - **架构**: Universal Binary (Intel + Apple Silicon)
-- **内容**: 可执行文件 + 配置文件 + 说明文档
+- **格式**: 标准 DMG 安装包
+- **特性**:
+  - 包含 Applications 快捷方式（拖拽安装）
+  - 包含可执行文件、配置文件和文档
 
 ### Linux (Ubuntu)
-- **文件**: `color-clicker-v0.1.0-linux.tar.gz`
-- **架构**: x86_64
-- **内容**: 可执行文件 + 配置文件 + 说明文档
+- **文件**: `color-clicker-v0.1.0-linux.deb`
+- **架构**: amd64 (x86_64)
+- **格式**: DEB 安装包
+- **特性**:
+  - 标准 Debian/Ubuntu 包格式
+  - 自动安装到 `/usr/local/bin`
+  - 创建桌面启动器 (Applications 菜单)
+  - 自动处理依赖关系
+  - 支持 `apt` 和 `dpkg` 管理
 
 ## 使用发布的安装包
 
 ### macOS
 1. 下载 `.dmg` 文件
 2. 双击打开 DMG
-3. 将 `color-clicker` 拖到 Applications 文件夹 (可选)
-4. 运行程序:
+3. 将 `color-clicker` 拖到 Applications 文件夹
+4. 从 Applications 启动，或运行:
    ```bash
    ./color-clicker
    ```
 
-### Linux
-1. 下载 `.tar.gz` 文件
-2. 解压:
+**首次运行权限**:
+- 系统可能提示需要**屏幕录制权限**
+- 系统可能提示需要**辅助功能权限**
+- 在 系统偏好设置 > 安全性与隐私 中授权
+
+### Linux (Ubuntu/Debian)
+1. 下载 `.deb` 文件
+2. 安装:
    ```bash
-   tar -xzf color-clicker-v0.1.0-linux.tar.gz
-   cd color-clicker
+   sudo dpkg -i color-clicker-v0.1.0-linux.deb
    ```
-3. 运行:
+   或使用 apt:
    ```bash
-   ./color-clicker
+   sudo apt install ./color-clicker-v0.1.0-linux.deb
    ```
+3. 从 Applications 菜单启动，或运行:
+   ```bash
+   color-clicker
+   ```
+
+**卸载**:
+```bash
+sudo dpkg -r color-clicker
+```
 
 ## 自定义构建
 
@@ -86,7 +108,8 @@ build-windows:
 
 ## 注意事项
 
-1. **macOS 权限**: 首次运行可能需要授权屏幕录制和辅助功能权限
-2. **Linux 依赖**: Ubuntu 需要安装 X11 相关库
+1. **macOS 权限**: 首次运行需要授权屏幕录制和辅助功能权限
+2. **Linux 依赖**: DEB 包会自动声明依赖，安装时 apt 会自动处理
 3. **标签命名**: 必须以 `v` 开头 (如 `v0.1.0`, `v1.0.0`)
 4. **构建时间**: 首次构建可能需要 5-10 分钟 (下载依赖)
+5. **DEB 包管理**: Linux 版本支持标准包管理工具 (apt/dpkg)

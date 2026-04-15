@@ -47,5 +47,13 @@ target/
 # Build artifacts
 **/*.dmg
 **/*.tar.gz
+**/*.deb
 *.exe
 *.msi
+
+# DMG build directories
+dmg-root/
+
+# DEB build directories
+debian/DEBIAN/
+debian/usr/

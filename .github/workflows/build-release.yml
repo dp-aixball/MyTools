@@ -51,17 +51,20 @@ jobs:
           -output target/color-clicker-universal
         chmod +x target/color-clicker-universal
     
-    - name: Create DMG Package
+    - name: Create Professional DMG Package
       run: |
         cd mac-tools/color-clicker
-        mkdir -p dist
-        cp target/color-clicker-universal dist/color-clicker
-        cp config.json dist/
-        cp README.md dist/
+        mkdir -p dmg-root
+        cp target/color-clicker-universal dmg-root/color-clicker
+        cp config.json dmg-root/
+        cp README.md dmg-root/
+        
+        # 创建 Applications 文件夹快捷方式
+        ln -s /Applications dmg-root/Applications
         
         # 创建 DMG
         hdiutil create -volname "Color Clicker" \
-          -srcfolder dist \
+          -srcfolder dmg-root \
           -ov -format UDZO \
           color-clicker-${{ github.ref_name }}-macos.dmg
     
@@ -86,7 +89,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-          libxkbcommon-dev libssl-dev libgtk-3-dev
+          libxkbcommon-dev libssl-dev libgtk-3-dev \
+          libxdo-dev libxtst-dev libx11-dev
     
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -99,27 +103,133 @@ jobs:
     
     - name: Build
       run: |
-        cd mac-tools/color-clicker
+        cd ubuntu-tools/color-clicker
         cargo build --release
     
-    - name: Create tarball
+    - name: Install packaging tools
       run: |
-        cd mac-tools/color-clicker
-        mkdir -p dist
-        cp target/release/color-clicker dist/
-        cp config.json dist/
-        cp README.md dist/
+        sudo apt-get install -y dpkg-dev debhelper fakeroot
+    
+    - name: Create DEB Package
+      run: |
+        cd ubuntu-tools/color-clicker
         
-        tar -czf color-clicker-${{ github.ref_name }}-linux.tar.gz -C dist .
+        # 创建 DEB 包结构
+        mkdir -p debian/{usr/local/bin,usr/share/doc/color-clicker,usr/share/applications,usr/share/pixmaps}
+        
+        # 复制二进制文件
+        cp target/release/color-clicker debian/usr/local/bin/
+        chmod +x debian/usr/local/bin/color-clicker
+        
+        # 复制文档
+        cp README.md debian/usr/share/doc/color-clicker/
+        cp config.json debian/usr/share/doc/color-clicker/
+        cp LICENSE debian/usr/share/doc/color-clicker/ 2>/dev/null || true
+        
+        # 创建桌面启动器
+        cat > debian/usr/share/applications/color-clicker.desktop << 'EOF'
+        [Desktop Entry]
+        Name=Color Clicker
+        Comment=悬浮框颜色检测自动点击工具
+        Exec=/usr/local/bin/color-clicker
+        Icon=color-clicker
+        Terminal=false
+        Type=Application
+        Categories=Utility;Development;
+        Keywords=color;clicker;screenshot;automation;
+        EOF
+        
+        # 创建 Debian 控制文件
+        cat > debian/DEBIAN/control << EOF
+        Package: color-clicker
+        Version: ${GITHUB_REF_NAME#v}
+        Section: utils
+        Priority: optional
+        Architecture: amd64
+        Depends: libxcb1, libx11-6, libssl3
+        Maintainer: Color Clicker Team
+        Description: Floating window color detection and auto-click tool
+         A GUI tool that detects blue color ratio on screen and performs
+         automatic mouse clicks when threshold is reached.
+         Features:
+         - Real-time color detection
+         - Configurable thresholds
+         - Auto-click with cooldown
+         - Transparent floating window
+        EOF
+        
+        # 创建 postinst 脚本
+        cat > debian/DEBIAN/postinst << 'EOF'
+        #!/bin/bash
+        set -e
+        echo "Color Clicker installed successfully!"
+        echo "You can launch it from Applications menu or run: color-clicker"
+        exit 0
+        EOF
+        chmod 755 debian/DEBIAN/postinst
+        
+        # 创建 prerm 脚本
+        cat > debian/DEBIAN/prerm << 'EOF'
+        #!/bin/bash
+        set -e
+        echo "Removing Color Clicker..."
+        exit 0
+        EOF
+        chmod 755 debian/DEBIAN/prerm
+        
+        # 构建 DEB 包
+        fakeroot dpkg-deb --build debian color-clicker-${{ github.ref_name }}-linux.deb
     
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: color-clicker-linux
-        path: mac-tools/color-clicker/color-clicker-${{ github.ref_name }}-linux.tar.gz
+        path: ubuntu-tools/color-clicker/color-clicker-${{ github.ref_name }}-linux.deb
+  
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build
+      run: |
+        cd windows-tools/color-clicker
+        cargo build --release
+    
+    - name: Create ZIP Package
+      run: |
+        cd windows-tools/color-clicker
+        mkdir -p package
+        cp target/release/color-clicker.exe package/
+        cp config.json package/
+        cp README.md package/ 2>$null || echo "No README"
+        cp LICENSE package/ 2>$null || echo "No LICENSE"
+        
+        # 创建 ZIP 包
+        Compress-Archive -Path package/* -DestinationPath color-clicker-${{ github.ref_name }}-windows.zip
+    
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: color-clicker-windows
+        path: windows-tools/color-clicker/color-clicker-${{ github.ref_name }}-windows.zip
   
   release:
-    needs: [build-macos]
+    needs: [build-macos, build-ubuntu, build-windows]
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/')
     
@@ -132,7 +242,8 @@ jobs:
       with:
         files: |
           color-clicker-macos/*.dmg
-          color-clicker-linux/*.tar.gz
+          color-clicker-linux/*.deb
+          color-clicker-windows/*.zip
         generate_release_notes: true
         draft: false
         prerelease: false
