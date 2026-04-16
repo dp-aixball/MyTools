@@ -34,17 +34,17 @@ jobs:
     
     - name: Build (Intel)
       run: |
-        cd mac-tools/color-clicker
+        cd color-clicker
         cargo build --release --target x86_64-apple-darwin
     
     - name: Build (Apple Silicon)
       run: |
-        cd mac-tools/color-clicker
+        cd color-clicker
         cargo build --release --target aarch64-apple-darwin
     
     - name: Create Universal Binary
       run: |
-        cd mac-tools/color-clicker
+        cd color-clicker
         lipo -create \
           target/x86_64-apple-darwin/release/color-clicker \
           target/aarch64-apple-darwin/release/color-clicker \
@@ -53,16 +53,50 @@ jobs:
     
     - name: Create Professional DMG Package
       run: |
-        cd mac-tools/color-clicker
+        cd color-clicker
+        
+        # 1. 创建标准的 .app 目录结构
+        mkdir -p "Color Clicker.app/Contents/MacOS"
+        mkdir -p "Color Clicker.app/Contents/Resources"
+        
+        # 2. 复制二进制文件
+        cp target/color-clicker-universal "Color Clicker.app/Contents/MacOS/color-clicker"
+        chmod +x "Color Clicker.app/Contents/MacOS/color-clicker"
+        
+        # 3. 生成 Info.plist
+        cat > "Color Clicker.app/Contents/Info.plist" << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>
+            <string>color-clicker</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.colorclicker.app</string>
+            <key>CFBundleName</key>
+            <string>Color Clicker</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.2.0</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.12</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+        </dict>
+        </plist>
+        EOF
+        
+        # 4. 创建打包根目录
         mkdir -p dmg-root
-        cp target/color-clicker-universal dmg-root/color-clicker
+        cp -R "Color Clicker.app" dmg-root/
         cp config.json dmg-root/
         cp README.md dmg-root/
         
-        # 创建 Applications 文件夹快捷方式
+        # 5. 创建 Applications 文件夹快捷方式
         ln -s /Applications dmg-root/Applications
         
-        # 创建 DMG
+        # 6. 创建 DMG
         hdiutil create -volname "Color Clicker" \
           -srcfolder dmg-root \
           -ov -format UDZO \
@@ -72,7 +106,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: color-clicker-macos
-        path: mac-tools/color-clicker/color-clicker-${{ github.ref_name }}-macos.dmg
+        path: color-clicker/color-clicker-${{ github.ref_name }}-macos.dmg
   
   build-ubuntu:
     runs-on: ubuntu-latest
@@ -103,7 +137,7 @@ jobs:
     
     - name: Build
       run: |
-        cd ubuntu-tools/color-clicker
+        cd color-clicker
         cargo build --release
     
     - name: Install packaging tools
@@ -112,10 +146,14 @@ jobs:
     
     - name: Create DEB Package
       run: |
-        cd ubuntu-tools/color-clicker
+        cd color-clicker
         
-        # 创建 DEB 包结构
-        mkdir -p debian/{usr/local/bin,usr/share/doc/color-clicker,usr/share/applications,usr/share/pixmaps}
+        # 创建 DEB 包结构 (关键：包含 DEBIAN 目录)
+        mkdir -p debian/DEBIAN
+        mkdir -p debian/usr/local/bin
+        mkdir -p debian/usr/share/doc/color-clicker
+        mkdir -p debian/usr/share/applications
+        mkdir -p debian/usr/share/pixmaps
         
         # 复制二进制文件
         cp target/release/color-clicker debian/usr/local/bin/
@@ -124,7 +162,7 @@ jobs:
         # 复制文档
         cp README.md debian/usr/share/doc/color-clicker/
         cp config.json debian/usr/share/doc/color-clicker/
-        cp LICENSE debian/usr/share/doc/color-clicker/ 2>/dev/null || true
+        cp ../LICENSE debian/usr/share/doc/color-clicker/ 2>/dev/null || true
         
         # 创建桌面启动器
         cat > debian/usr/share/applications/color-clicker.desktop << 'EOF'
@@ -143,19 +181,10 @@ jobs:
         cat > debian/DEBIAN/control << EOF
         Package: color-clicker
         Version: ${GITHUB_REF_NAME#v}
-        Section: utils
-        Priority: optional
         Architecture: amd64
-        Depends: libxcb1, libx11-6, libssl3
+        Depends: libxcb1, libx11-6, libssl3, libxtst6
         Maintainer: Color Clicker Team
         Description: Floating window color detection and auto-click tool
-         A GUI tool that detects blue color ratio on screen and performs
-         automatic mouse clicks when threshold is reached.
-         Features:
-         - Real-time color detection
-         - Configurable thresholds
-         - Auto-click with cooldown
-         - Transparent floating window
         EOF
         
         # 创建 postinst 脚本
@@ -163,19 +192,9 @@ jobs:
         #!/bin/bash
         set -e
         echo "Color Clicker installed successfully!"
-        echo "You can launch it from Applications menu or run: color-clicker"
         exit 0
         EOF
         chmod 755 debian/DEBIAN/postinst
-        
-        # 创建 prerm 脚本
-        cat > debian/DEBIAN/prerm << 'EOF'
-        #!/bin/bash
-        set -e
-        echo "Removing Color Clicker..."
-        exit 0
-        EOF
-        chmod 755 debian/DEBIAN/prerm
         
         # 构建 DEB 包
         fakeroot dpkg-deb --build debian color-clicker-${{ github.ref_name }}-linux.deb
@@ -184,7 +203,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: color-clicker-linux
-        path: ubuntu-tools/color-clicker/color-clicker-${{ github.ref_name }}-linux.deb
+        path: color-clicker/color-clicker-${{ github.ref_name }}-linux.deb
   
   build-windows:
     runs-on: windows-latest
@@ -195,6 +214,11 @@ jobs:
     
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
+    
+    - name: Setup NSIS
+      run: |
+        choco install nsis -y
+        "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -207,26 +231,20 @@ jobs:
     
     - name: Build
       run: |
-        cd windows-tools/color-clicker
+        cd color-clicker
         cargo build --release
     
-    - name: Create ZIP Package
+    - name: Create EXE Installer
       run: |
-        cd windows-tools/color-clicker
-        mkdir -p package
-        cp target/release/color-clicker.exe package/
-        cp config.json package/
-        cp README.md package/ 2>$null || echo "No README"
-        cp LICENSE package/ 2>$null || echo "No LICENSE"
-        
-        # 创建 ZIP 包
-        Compress-Archive -Path package/* -DestinationPath color-clicker-${{ github.ref_name }}-windows.zip
+        cd color-clicker
+        makensis installer.nsi
+        mv color-clicker-setup.exe color-clicker-${{ github.ref_name }}-windows-setup.exe
     
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: color-clicker-windows
-        path: windows-tools/color-clicker/color-clicker-${{ github.ref_name }}-windows.zip
+        path: color-clicker/color-clicker-${{ github.ref_name }}-windows-setup.exe
   
   release:
     needs: [build-macos, build-ubuntu, build-windows]
@@ -243,7 +261,7 @@ jobs:
         files: |
           color-clicker-macos/*.dmg
           color-clicker-linux/*.deb
-          color-clicker-windows/*.zip
+          color-clicker-windows/*.exe
         generate_release_notes: true
         draft: false
         prerelease: false

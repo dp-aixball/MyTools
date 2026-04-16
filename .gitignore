@@ -1,59 +1,35 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
+# Rust
+target/
+**/*.rs.bk
+*.pdb
 
-# macOS
+# Build Artifacts (Cross-platform)
+**/*.dmg
+**/*.deb
+**/*.exe
+**/*.msi
+**/*.zip
+**/*.tar.gz
+
+# Packaging directories
+dmg-root/
+package/
+debian/DEBIAN/
+debian/usr/
+
+# Config & Sensitive
+*.ini
+config.local.json
+.env
+
+# IDE & OS
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-*.app/
-*.dSYM/
-
-# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Config
-*.ini
-config.local.json
+.qoder/
 
 # Logs
 *.log
 logs/
-
-# Temporary files
-*.tmp
-*.temp
-*~
-
-# Rust
-target/
-*.rs.bk
-*.pdb
-
-# Build artifacts
-**/*.dmg
-**/*.tar.gz
-**/*.deb
-*.exe
-*.msi
-
-# DMG build directories
-dmg-root/
-
-# DEB build directories
-debian/DEBIAN/
-debian/usr/

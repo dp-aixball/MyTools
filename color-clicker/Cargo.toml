@@ -1,17 +1,14 @@
 [package]
 name = "color-clicker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "悬浮框颜色检测自动点击工具 (Windows)"
+description = "悬浮框颜色检测自动点击工具 (跨平台)"
 license = "MIT"
 
 [dependencies]
 # GUI 框架
 eframe = "0.28"
 egui = "0.28"
-
-# 屏幕捕获 (Windows)
-screenshots = "0.8"
 
 # 鼠标控制
 enigo = "0.2"
@@ -30,6 +27,15 @@ chrono = "0.4"
 log = "0.4"
 env_logger = "0.11"
 
-# Windows API
-[target.'cfg(windows)'.dependencies]
+# 平台特定依赖 - Linux
+[target.'cfg(target_os = "linux")'.dependencies]
+xcap = "0.0.14"
+x11 = { version = "2.21", features = ["xlib"] }
+
+# 平台特定依赖 - macOS & Windows
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+screenshots = "0.8"
+
+# 平台特定依赖 - Windows 独有
+[target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
