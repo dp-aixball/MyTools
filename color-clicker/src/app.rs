@@ -19,6 +19,7 @@ pub struct ColorClickerApp {
     last_click_time: Instant,
     detection_status: String,
     error_message: String,
+    click_count: u64,
     last_avg_red: f64,
     last_avg_green: f64,
     last_avg_blue: f64,
@@ -39,6 +40,7 @@ impl ColorClickerApp {
             last_click_time: Instant::now(),
             detection_status: String::from("Running"),
             error_message: String::new(),
+            click_count: 0,
             last_avg_red: -1.0,
             last_avg_green: -1.0,
             last_avg_blue: -1.0,
@@ -118,6 +120,7 @@ impl ColorClickerApp {
 
                                 match AutoClicker::click(click_x, click_y) {
                                     Ok(_) => {
+                                        self.click_count += 1;
                                         self.detection_status = format!(
                                             "Clicked! Blue: {:.1}%",
                                             self.blue_ratio * 100.0
@@ -155,10 +158,10 @@ impl eframe::App for ColorClickerApp {
         // 处理键盘输入调节阈值
         ctx.input(|i| {
             if i.key_pressed(egui::Key::ArrowUp) {
-                self.config.color_ratio = (self.config.color_ratio + 0.1).min(1.0);
+                self.config.color_ratio = (self.config.color_ratio + 0.01).min(1.0);
             }
             if i.key_pressed(egui::Key::ArrowDown) {
-                self.config.color_ratio = (self.config.color_ratio - 0.1).max(0.0);
+                self.config.color_ratio = (self.config.color_ratio - 0.01).max(0.0);
             }
         });
 
@@ -232,7 +235,7 @@ impl eframe::App for ColorClickerApp {
                                     .color(egui::Color32::LIGHT_GRAY),
                             );
                             ui.label(
-                                egui::RichText::new(format!("{:.1}", self.config.color_ratio))
+                                egui::RichText::new(format!("{:.2}", self.config.color_ratio))
                                     .size(11.0)
                                     .color(egui::Color32::from_rgb(255, 215, 0))
                                     .strong(),
@@ -283,6 +286,15 @@ impl eframe::App for ColorClickerApp {
                         center_rect,
                         1.0,
                         egui::Stroke::new(1.5, stroke_color),
+                    );
+
+                    // 在矩形框中央显示点击次数
+                    ui.painter().text(
+                        center_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        self.click_count.to_string(),
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
                     );
 
                     ui.add_space(4.0);
