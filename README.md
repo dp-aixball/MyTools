@@ -4,25 +4,24 @@
 
 ```
 MyTools/
-├── mac-tools/          # macOS 专用工具
-│   └── color-clicker/  # 颜色检测点击器
-├── ubuntu-tools/       # Ubuntu 专用工具
-├── shared/             # 跨平台共享代码
-├── resources/          # 资源文件(图标、配置等)
+├── color-clicker/      # 跨平台颜色检测自动点击器 (Rust)
+├── shared/             # 跨平台共享库
+├── resources/          # 资源文件 (图标、配置等)
 └── README.md           # 项目说明
 ```
 
 ## 工具列表
 
-### 1. Color Clicker (macOS)
-悬浮框颜色检测自动点击工具。将悬浮框拖到指定位置,如果框内大部分是蓝色则自动触发鼠标单击。
+### 1. Color Clicker (Cross-Platform)
+悬浮框颜色检测自动点击工具。支持 Windows, macOS 和 Linux (Ubuntu)。
+将悬浮框拖到指定位置，检测到特定颜色占比后自动触发鼠标点击。
+
+## 开发环境
+
+- **语言**: Rust 1.70+
+- **构建工具**: Cargo
+- **跨平台支持**: Windows (MSVC), macOS (App bundle/DMG), Linux (X11/DEB)
 
 ## 使用方法
 
 各工具的具体使用方法请参考其子目录中的 README。
-
-## 开发环境
-
-- macOS 工具: Python 3.x + pyobjc
-- Ubuntu 工具: Python 3.x + python3-xlib
-- 共享工具: 纯 Python 实现
