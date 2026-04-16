@@ -217,7 +217,21 @@ jobs:
     
     - name: Setup NSIS
       run: |
-        choco install nsis -y
+        $success = $false
+        for ($i=1; $i -le 5; $i++) {
+          Write-Host "Attempting to install NSIS (Attempt $i/5)..."
+          choco install nsis -y --no-progress
+          if ($LASTEXITCODE -eq 0) {
+            $success = $true
+            break
+          }
+          Write-Host "Choco install failed with exit code $LASTEXITCODE, retrying in 30 seconds..."
+          Start-Sleep -Seconds 30
+        }
+        if (-not $success) {
+          Write-Error "Failed to install NSIS after 5 attempts."
+          exit 1
+        }
         "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     
     - name: Cache cargo registry
