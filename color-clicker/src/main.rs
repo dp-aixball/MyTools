@@ -41,13 +41,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 窗口选项
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([95.0, 140.0]) // 宽高极简
+            .with_inner_size([95.0, 160.0]) // 宽高极简，略微增加高度确保显示全
             .with_position([initial_x, initial_y]) // 记住上次位置
             .with_resizable(false) // 禁止调整大小
             .with_maximize_button(false) // 禁止最大化
             .with_always_on_top()
             .with_transparent(true)
-            .with_decorations(true), // 保留标题栏以便拖动
+            .with_decorations(true) // 保留标题栏以便拖动
+            .with_icon(load_icon()),
         ..Default::default()
     };
 
@@ -55,4 +56,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native("Color Clicker", options, Box::new(|_cc| Ok(Box::new(app))))?;
 
     Ok(())
+}
+
+fn load_icon() -> egui::IconData {
+    let icon_bytes = include_bytes!("../../resources/icon.png");
+    let image = image::load_from_memory(icon_bytes)
+        .expect("Failed to open icon")
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    let rgba = image.into_raw();
+
+    egui::IconData {
+        rgba,
+        width,
+        height,
+    }
 }

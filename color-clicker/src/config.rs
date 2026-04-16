@@ -63,8 +63,8 @@ impl Default for Config {
             color_ratio: 0.5,
             detection_interval_ms: 500,
             box_size: BoxSize {
-                width: 100,
-                height: 100,
+                width: 40,
+                height: 20,
             },
             click_delay_ms: 5000,
             window_pos: WindowPos::default(),

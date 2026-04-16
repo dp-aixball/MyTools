@@ -1,5 +1,5 @@
 {
-  "color_ratio": 0.5,
+  "color_ratio": 0.46,
   "detection_interval_ms": 500,
   "box_size": {
     "width": 100,
@@ -7,7 +7,7 @@
   },
   "click_delay_ms": 5000,
   "window_pos": {
-    "x": 2325.0,
-    "y": 1047.0
+    "x": 996.0,
+    "y": 311.0
   }
 }

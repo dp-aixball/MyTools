@@ -11,6 +11,8 @@ Name "${APP_NAME}"
 OutFile "color-clicker-setup.exe"
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
 RequestExecutionLevel admin
+!define MUI_ICON "../resources/icon.ico"
+!define MUI_UNICON "../resources/icon.ico"
 
 ; ==========================================================
 ; 界面配置

@@ -63,20 +63,46 @@ impl ColorClickerApp {
 
             #[cfg(target_os = "linux")]
             let (capture_x, capture_y, capture_width, capture_height) = {
-                // 使用 egui 的缩放因子转换坐标 (Linux 下通常需要)
+                // 使用 egui 的缩放因子转换坐标
                 let scale = ctx.pixels_per_point();
                 let x = (window_pos.center().x * scale - width as f32 * scale / 2.0) as i32;
-                let y = (window_pos.max.y * scale) as i32;
+                let y = (window_pos.center().y * scale - height as f32 * scale / 2.0) as i32;
                 let w = (width as f32 * scale) as u32;
                 let h = (height as f32 * scale) as u32;
                 (x, y, w, h)
             };
 
+            #[cfg(not(target_os = "macos"))]
+            let window_pos = ctx.input(|i| i.viewport().outer_rect).unwrap_or_default().min;
+            
             #[cfg(not(target_os = "linux"))]
-            let (capture_x, capture_y, capture_width, capture_height) = {
-                let x = window_pos.center().x as i32 - (width / 2);
-                let y = window_pos.max.y as i32;
-                (x, y, width as u32, height as u32)
+            let (capture_x, capture_y, capture_width, capture_height, click_x, click_y) = {
+                let scale = ctx.pixels_per_point();
+                // 1. 获取当前窗口在屏幕上的绝对位置（包括内容区相对于物理屏幕的偏移）
+                let viewport = ctx.input(|i| i.viewport().clone());
+                let inner_rect = viewport.inner_rect.unwrap_or_else(|| {
+                    let pos = viewport.outer_rect.unwrap_or(egui::Rect::ZERO).min;
+                    egui::Rect::from_min_size(pos, egui::Vec2::ZERO)
+                });
+                
+                // 2. 获取 UI 内容的中心（逻辑点）
+                let screen_center = ctx.screen_rect().center();
+                let logical_target = egui::pos2(screen_center.x, screen_center.y + 15.0);
+                
+                // 3. 计算屏幕上的绝对物理位置（逻辑点 -> 物理位置）
+                let screen_pos = inner_rect.min + egui::vec2(logical_target.x, logical_target.y);
+                
+                // 4. 物理像素坐标（用于 ScreenCapture）
+                let cap_x = (screen_pos.x * scale - (width as f32 * scale / 2.0)) as i32;
+                let cap_y = (screen_pos.y * scale - (height as f32 * scale / 2.0)) as i32;
+                let cap_w = (width as f32 * scale) as u32;
+                let cap_h = (height as f32 * scale) as u32;
+                
+                // 5. 逻辑点坐标（用于 Enigo 点击）
+                let clk_x = screen_pos.x as i32;
+                let clk_y = screen_pos.y as i32;
+                
+                (cap_x, cap_y, cap_w, cap_h, clk_x, clk_y)
             };
 
             match ScreenCapture::capture_region(capture_x, capture_y, capture_width, capture_height)
@@ -115,23 +141,28 @@ impl ColorClickerApp {
                             if self.last_click_time.elapsed()
                                 >= Duration::from_millis(self.config.click_delay_ms)
                             {
-                                let click_x = capture_x + capture_width as i32 / 2;
-                                let click_y = capture_y + capture_height as i32 / 2;
+                                // 异步穿透点击核心逻辑
+                                // 1. 先开启鼠标穿透
+                                ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
+                                
+                                let ctx_clone = ctx.clone();
+                                std::thread::spawn(move || {
+                                    // 2. 给予操作系统足够的反应时间（约 40ms），确保穿透指令已生效
+                                    std::thread::sleep(std::time::Duration::from_millis(40));
+                                    
+                                    // 3. 执行真正的鼠标点击（此时会穿透窗口点击到后台程序）
+                                    let _ = AutoClicker::click(click_x, click_y);
+                                    
+                                    // 4. 点击完成后，恢复窗口交互
+                                    ctx_clone.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(false));
+                                });
 
-                                match AutoClicker::click(click_x, click_y) {
-                                    Ok(_) => {
-                                        self.click_count += 1;
-                                        self.detection_status = format!(
-                                            "Clicked! Blue: {:.1}%",
-                                            self.blue_ratio * 100.0
-                                        );
-                                        self.last_click_time = Instant::now();
-                                    }
-                                    Err(e) => {
-                                        self.error_message = e;
-                                        self.detection_status = String::from("Click failed");
-                                    }
-                                }
+                                self.click_count += 1;
+                                self.last_click_time = Instant::now();
+                                self.detection_status = format!(
+                                    "Clicked! Blue: {:.1}%",
+                                    self.blue_ratio * 100.0
+                                );
                             } else {
                                 self.detection_status =
                                     format!("Cooldown... Blue: {:.1}%", self.blue_ratio * 100.0);
@@ -183,7 +214,8 @@ impl eframe::App for ColorClickerApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 25, 230)) // 深色半透明底色
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 0)))
                     .inner_margin(egui::Margin::symmetric(6.0, 4.0))
                     .rounding(4.0),
             )
@@ -241,7 +273,7 @@ impl eframe::App for ColorClickerApp {
                                     .strong(),
                             );
                             ui.label(
-                                egui::RichText::new("↑↓")
+                                egui::RichText::new("+/-")
                                     .size(9.0)
                                     .color(egui::Color32::DARK_GRAY),
                             );
@@ -265,21 +297,27 @@ impl eframe::App for ColorClickerApp {
                     });
 
                     ui.add_space(2.0);
+                    
+                    // 3. 视觉预览框 (准星模式：大小由 config.box_size 决定)
+                    let area_size = egui::Vec2::new(
+                        self.config.box_size.width as f32,
+                        self.config.box_size.height as f32,
+                    );
+                    let (_rect, _) = ui.allocate_exact_size(area_size, egui::Sense::hover());
 
-                    // 3. 视觉预览框 (强制居中)
-                    let area_size = egui::Vec2::new(50.0, 30.0);
-                    let (rect, _) = ui.allocate_exact_size(area_size, egui::Sense::hover());
-
-                    // 修正 rect 位置确保居中
+                    // 计算准星的逻辑中心位置（Window-local 坐标系）
+                    let screen_center = ui.ctx().screen_rect().center();
+                    let logical_center = egui::pos2(screen_center.x, screen_center.y + 15.0);
+                    
                     let center_rect = egui::Rect::from_center_size(
-                        egui::pos2(ui.min_rect().center().x, rect.center().y),
+                        logical_center,
                         area_size,
                     );
 
                     let stroke_color = if self.blue_ratio >= self.config.color_ratio {
-                        egui::Color32::from_rgb(255, 255, 0)
+                        egui::Color32::YELLOW
                     } else {
-                        egui::Color32::from_gray(100)
+                        egui::Color32::from_gray(180) // 调亮未击中时的预览框
                     };
 
                     ui.painter().rect_stroke(
@@ -288,48 +326,20 @@ impl eframe::App for ColorClickerApp {
                         egui::Stroke::new(1.5, stroke_color),
                     );
 
-                    // 在矩形框中央显示点击次数
-                    ui.painter().text(
-                        center_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        self.click_count.to_string(),
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::WHITE,
+                    // 绘制准星 (+)：荧光绿，线宽 2.0，极度显眼
+                    let center = center_rect.center();
+                    let cross_size = 6.0; // 稍微拉长一点
+                    let cross_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0));
+                    ui.painter().line_segment(
+                        [center - egui::vec2(cross_size, 0.0), center + egui::vec2(cross_size, 0.0)],
+                        cross_stroke,
+                    );
+                    ui.painter().line_segment(
+                        [center - egui::vec2(0.0, cross_size), center + egui::vec2(0.0, cross_size)],
+                        cross_stroke,
                     );
 
-                    ui.add_space(4.0);
-                    ui.add(egui::Separator::default().spacing(4.0));
-
-                    // 4. 状态栏
-                    let (status_text, status_color) = if !self.error_message.is_empty() {
-                        (
-                            format!("! {}", self.error_message),
-                            egui::Color32::from_rgb(255, 100, 100),
-                        )
-                    } else if self.detection_status.contains("Clicked") {
-                        (
-                            String::from("● SUCCESS"),
-                            egui::Color32::from_rgb(100, 255, 150),
-                        )
-                    } else if self.detection_status.contains("Active")
-                        || self.detection_status.contains("Running")
-                    {
-                        (
-                            String::from("● SCANNING"),
-                            egui::Color32::from_rgb(150, 150, 150),
-                        )
-                    } else {
-                        (
-                            format!("○ {}", self.detection_status.to_uppercase()),
-                            egui::Color32::from_gray(120),
-                        )
-                    };
-
-                    ui.label(
-                        egui::RichText::new(status_text)
-                            .size(9.0)
-                            .color(status_color),
-                    );
+                    ui.add_space(3.0);
                 });
             });
 

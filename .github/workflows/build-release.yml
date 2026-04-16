@@ -51,6 +51,22 @@ jobs:
           -output target/color-clicker-universal
         chmod +x target/color-clicker-universal
     
+    - name: Generate macOS Icon
+      run: |
+        mkdir -p icon.iconset
+        sips -z 16 16     resources/icon.png --out icon.iconset/icon_16x16.png
+        sips -z 32 32     resources/icon.png --out icon.iconset/icon_16x16@2x.png
+        sips -z 32 32     resources/icon.png --out icon.iconset/icon_32x32.png
+        sips -z 64 64     resources/icon.png --out icon.iconset/icon_32x32@2x.png
+        sips -z 128 128   resources/icon.png --out icon.iconset/icon_128x128.png
+        sips -z 256 256   resources/icon.png --out icon.iconset/icon_128x128@2x.png
+        sips -z 256 256   resources/icon.png --out icon.iconset/icon_256x256.png
+        sips -z 512 512   resources/icon.png --out icon.iconset/icon_256x256@2x.png
+        sips -z 512 512   resources/icon.png --out icon.iconset/icon_512x512.png
+        sips -z 1024 1024 resources/icon.png --out icon.iconset/icon_512x512@2x.png
+        iconutil -c icns icon.iconset
+        cp icon.icns "color-clicker/Color Clicker.app/Contents/Resources/"
+    
     - name: Create Professional DMG Package
       run: |
         cd color-clicker
@@ -63,7 +79,10 @@ jobs:
         cp target/color-clicker-universal "Color Clicker.app/Contents/MacOS/color-clicker"
         chmod +x "Color Clicker.app/Contents/MacOS/color-clicker"
         
-        # 3. 生成 Info.plist
+        # 3. 复制图标
+        cp icon.icns "Color Clicker.app/Contents/Resources/icon.icns"
+        
+        # 4. 生成 Info.plist
         cat > "Color Clicker.app/Contents/Info.plist" << 'EOF'
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -83,6 +102,8 @@ jobs:
             <string>10.12</string>
             <key>NSHighResolutionCapable</key>
             <true/>
+            <key>CFBundleIconFile</key>
+            <string>icon.icns</string>
         </dict>
         </plist>
         EOF
@@ -233,6 +254,10 @@ jobs:
           exit 1
         }
         "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Generate Windows Icon
+      run: |
+        magick convert resources/icon.png -define icon:auto-resize=256,128,64,48,32,16 resources/icon.ico
     
     - name: Cache cargo registry
       uses: actions/cache@v4

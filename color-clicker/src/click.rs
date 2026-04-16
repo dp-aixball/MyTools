@@ -51,9 +51,4 @@ impl AutoClicker {
 
         Ok(())
     }
-
-    /// 延迟指定时间
-    pub fn delay(ms: u64) {
-        thread::sleep(Duration::from_millis(ms));
-    }
 }
