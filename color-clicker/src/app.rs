@@ -5,6 +5,19 @@ use crate::screen::ScreenCapture;
 use eframe::egui;
 use std::time::{Duration, Instant};
 
+/// 颜色检测结果
+#[derive(Default, Clone)]
+struct DetectionResult {
+    avg_red: f64,
+    avg_green: f64,
+    avg_blue: f64,
+    blue_ratio: f64,
+    status: String,
+    clicked: bool,
+    error: Option<String>,
+    duration: Duration,
+}
+
 /// 悬浮框应用状态
 pub struct ColorClickerApp {
     config: Config,
@@ -23,10 +36,17 @@ pub struct ColorClickerApp {
     last_avg_red: f64,
     last_avg_green: f64,
     last_avg_blue: f64,
+
+    // 异步检测相关
+    result_receiver: std::sync::mpsc::Receiver<DetectionResult>,
+    result_sender: std::sync::mpsc::Sender<DetectionResult>,
+    is_working: bool,
+    last_thread_duration: Duration,
 }
 
 impl ColorClickerApp {
     pub fn new(config: Config) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
         Self {
             config,
             window_x: 200,
@@ -44,155 +64,222 @@ impl ColorClickerApp {
             last_avg_red: -1.0,
             last_avg_green: -1.0,
             last_avg_blue: -1.0,
+            result_receiver: rx,
+            result_sender: tx,
+            is_working: false,
+            last_thread_duration: Duration::ZERO,
         }
     }
 
-    /// 执行颜色检测和点击
-    fn detect_and_click(&mut self, ctx: &egui::Context) {
-        if !self.is_detecting {
+    /// 启动后台检测线程
+    fn start_async_detection(&mut self, ctx: &egui::Context) {
+        if self.is_working || !self.is_detecting {
             return;
         }
 
-        let width = self.config.box_size.width as i32;
-        let height = self.config.box_size.height as i32;
+        let scale = ctx.pixels_per_point();
+        // 获取视口信息
+        let viewport = ctx.input(|i| i.viewport().clone());
+        let inner_rect = viewport.inner_rect.unwrap_or_else(|| {
+            let pos = viewport.outer_rect.unwrap_or(egui::Rect::ZERO).min;
+            egui::Rect::from_min_size(pos, egui::Vec2::ZERO)
+        });
 
-        // 获取窗口在屏幕上的真实位置
-        if let Some(window_pos) = ctx.input(|i| i.viewport().outer_rect) {
-            self.window_x = window_pos.min.x as i32;
-            self.window_y = window_pos.min.y as i32;
+        // 更新状态，启动线程
+        self.is_working = true;
+        let tx = self.result_sender.clone();
+        let ctx_clone = ctx.clone();
+        let config = self.config.clone();
+        let auto_click = self.auto_click_enabled;
+        let last_click = self.last_click_time;
 
-            #[cfg(target_os = "linux")]
-            let (capture_x, capture_y, capture_width, capture_height) = {
-                // 使用 egui 的缩放因子转换坐标
-                let scale = ctx.pixels_per_point();
-                let x = (window_pos.center().x * scale - width as f32 * scale / 2.0) as i32;
-                let y = (window_pos.center().y * scale - height as f32 * scale / 2.0) as i32;
-                let w = (width as f32 * scale) as u32;
-                let h = (height as f32 * scale) as u32;
-                (x, y, w, h)
-            };
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            let mut result = DetectionResult::default();
 
+            let width = config.box_size.width as i32;
+            let height = config.box_size.height as i32;
+            let screen_rect = ctx_clone.screen_rect();
+            let screen_center = screen_rect.center();
+            let logical_target = egui::pos2(screen_center.x, screen_center.y + 15.0);
+            let screen_pos = inner_rect.min + egui::vec2(logical_target.x, logical_target.y);
+
+            #[cfg(target_os = "macos")]
+            let (capture_x, capture_y) = (
+                (screen_pos.x - (width as f32 / 2.0)) as i32,
+                (screen_pos.y - (height as f32 / 2.0)) as i32,
+            );
             #[cfg(not(target_os = "macos"))]
-            let window_pos = ctx.input(|i| i.viewport().outer_rect).unwrap_or_default().min;
-            
-            #[cfg(not(target_os = "linux"))]
-            let (capture_x, capture_y, capture_width, capture_height, click_x, click_y) = {
-                let scale = ctx.pixels_per_point();
-                // 1. 获取当前窗口在屏幕上的绝对位置（包括内容区相对于物理屏幕的偏移）
-                let viewport = ctx.input(|i| i.viewport().clone());
-                let inner_rect = viewport.inner_rect.unwrap_or_else(|| {
-                    let pos = viewport.outer_rect.unwrap_or(egui::Rect::ZERO).min;
-                    egui::Rect::from_min_size(pos, egui::Vec2::ZERO)
-                });
-                
-                // 2. 获取 UI 内容的中心（逻辑点）
-                let screen_center = ctx.screen_rect().center();
-                let logical_target = egui::pos2(screen_center.x, screen_center.y + 15.0);
-                
-                // 3. 计算屏幕上的绝对物理位置（逻辑点 -> 物理位置）
-                let screen_pos = inner_rect.min + egui::vec2(logical_target.x, logical_target.y);
-                
-                // 4. 物理像素坐标（用于 ScreenCapture）
-                let cap_x = (screen_pos.x * scale - (width as f32 * scale / 2.0)) as i32;
-                let cap_y = (screen_pos.y * scale - (height as f32 * scale / 2.0)) as i32;
-                let cap_w = (width as f32 * scale) as u32;
-                let cap_h = (height as f32 * scale) as u32;
-                
-                // 5. 逻辑点坐标（用于 Enigo 点击）
-                let clk_x = screen_pos.x as i32;
-                let clk_y = screen_pos.y as i32;
-                
-                (cap_x, cap_y, cap_w, cap_h, clk_x, clk_y)
+            let (capture_x, capture_y) = (
+                (screen_pos.x * scale - (width as f32 * scale / 2.0)) as i32,
+                (screen_pos.y * scale - (height as f32 * scale / 2.0)) as i32,
+            );
+
+            let capture_width = if cfg!(target_os = "macos") {
+                width as u32
+            } else {
+                (width as f32 * scale) as u32
             };
+            let capture_height = if cfg!(target_os = "macos") {
+                height as u32
+            } else {
+                (height as f32 * scale) as u32
+            };
+
+            #[cfg(target_os = "macos")]
+            let (click_x, click_y) = (screen_pos.x as i32, screen_pos.y as i32);
+            #[cfg(not(target_os = "macos"))]
+            let (click_x, click_y) = ((screen_pos.x * scale) as i32, (screen_pos.y * scale) as i32);
 
             match ScreenCapture::capture_region(capture_x, capture_y, capture_width, capture_height)
             {
                 Ok(pixels) => {
                     if pixels.is_empty() {
-                        self.detection_status = String::from("No pixels captured");
-                        return;
-                    }
+                        result.status = String::from("No pixels captured");
+                    } else {
+                        let analysis = ColorDetector::analyze_colors(&pixels, &config);
+                        result.avg_red = analysis.avg_red;
+                        result.avg_green = analysis.avg_green;
+                        result.avg_blue = analysis.avg_blue;
+                        result.blue_ratio = analysis.blue_ratio;
 
-                    // 分析颜色
-                    let analysis = ColorDetector::analyze_colors(&pixels, &self.config);
-                    self.avg_red = analysis.avg_red;
-                    self.avg_green = analysis.avg_green;
-                    self.avg_blue = analysis.avg_blue;
-                    self.blue_ratio = analysis.blue_ratio;
-
-                    // 只在新颜色值时才输出日志
-                    if (self.avg_red - self.last_avg_red).abs() > 1.0
-                        || (self.avg_green - self.last_avg_green).abs() > 1.0
-                        || (self.avg_blue - self.last_avg_blue).abs() > 1.0
-                    {
-                        println!(
-                            "[COLOR] R={:.0} G={:.0} B={:.0}",
-                            self.avg_red, self.avg_green, self.avg_blue
-                        );
-                        self.last_avg_red = self.avg_red;
-                        self.last_avg_green = self.avg_green;
-                        self.last_avg_blue = self.avg_blue;
-                    }
-
-                    // 检查是否需要点击
-                    if ColorDetector::should_click(self.blue_ratio, &self.config) {
-                        if self.auto_click_enabled {
-                            // 检查点击冷却时间
-                            if self.last_click_time.elapsed()
-                                >= Duration::from_millis(self.config.click_delay_ms)
+                        if ColorDetector::should_click(result.blue_ratio, &config) {
+                            if auto_click
+                                && last_click.elapsed()
+                                    >= Duration::from_millis(config.click_delay_ms as u64)
                             {
-                                // 异步穿透点击核心逻辑
-                                // 1. 先开启鼠标穿透
-                                ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true));
-                                
-                                let ctx_clone = ctx.clone();
-                                std::thread::spawn(move || {
-                                    // 2. 给予操作系统足够的反应时间（约 40ms），确保穿透指令已生效
-                                    std::thread::sleep(std::time::Duration::from_millis(40));
-                                    
-                                    // 3. 执行真正的鼠标点击（此时会穿透窗口点击到后台程序）
-                                    let _ = AutoClicker::click(click_x, click_y);
-                                    
-                                    // 4. 点击完成后，恢复窗口交互
-                                    ctx_clone.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(false));
-                                });
-
-                                self.click_count += 1;
-                                self.last_click_time = Instant::now();
-                                self.detection_status = format!(
-                                    "Clicked! Blue: {:.1}%",
-                                    self.blue_ratio * 100.0
+                                // 执行点击
+                                println!(
+                                    "🚀 [DETECTED] Starting click sequence at ({}, {})",
+                                    click_x, click_y
                                 );
+                                ctx_clone.send_viewport_cmd(
+                                    egui::ViewportCommand::MousePassthrough(true),
+                                );
+                                std::thread::sleep(Duration::from_millis(100)); // 稍微拉长等待时间确保穿透生效
+
+                                match AutoClicker::click(click_x, click_y) {
+                                    Ok(_) => {
+                                        println!("✅ [SUCCESS] Click event sent successfully");
+                                        result.status =
+                                            format!("CLICKED! Blue: {:.2}", result.blue_ratio);
+                                    }
+                                    Err(e) => {
+                                        println!("❌ [ERROR] AutoClicker failed: {}", e);
+                                        result.status = format!("Click Error: {}", e);
+                                    }
+                                }
+
+                                ctx_clone.send_viewport_cmd(
+                                    egui::ViewportCommand::MousePassthrough(false),
+                                );
+                                result.clicked = true;
+                            } else if auto_click {
+                                result.status = format!("Wait... Blue: {:.2}", result.blue_ratio);
                             } else {
-                                self.detection_status =
-                                    format!("Cooldown... Blue: {:.1}%", self.blue_ratio * 100.0);
+                                result.status = format!("Target Matched (Auto-click OFF)");
                             }
                         } else {
-                            self.detection_status = format!("Target Matched (Auto-click OFF)");
+                            result.status = format!("Detecting... Blue: {:.2}", result.blue_ratio);
                         }
-                    } else {
-                        self.detection_status =
-                            format!("Detecting... Blue: {:.1}%", self.blue_ratio * 100.0);
                     }
                 }
                 Err(e) => {
-                    self.error_message = e;
-                    self.detection_status = String::from("Screenshot failed");
+                    result.error = Some(e);
+                    result.status = String::from("Screenshot failed");
                 }
+            }
+
+            result.duration = start.elapsed();
+            let _ = tx.send(result);
+        });
+    }
+
+    /// 处理检测结果
+    fn handle_detection_results(&mut self) {
+        while let Ok(result) = self.result_receiver.try_recv() {
+            self.is_working = false;
+            self.avg_red = result.avg_red;
+            self.avg_green = result.avg_green;
+            self.avg_blue = result.avg_blue;
+            self.blue_ratio = result.blue_ratio;
+            self.detection_status = result.status;
+            self.last_thread_duration = result.duration;
+
+            if result.clicked {
+                self.click_count += 1;
+                self.last_click_time = Instant::now();
+            }
+
+            if let Some(err) = result.error {
+                self.error_message = err;
+            }
+
+            // 输出日志
+            if (self.avg_red - self.last_avg_red).abs() > 1.0
+                || (self.avg_green - self.last_avg_green).abs() > 1.0
+                || (self.avg_blue - self.last_avg_blue).abs() > 1.0
+            {
+                println!(
+                    "[COLOR] R={:.0} G={:.0} B={:.0} (in {:?})",
+                    self.avg_red, self.avg_green, self.avg_blue, self.last_thread_duration
+                );
+                self.last_avg_red = self.avg_red;
+                self.last_avg_green = self.avg_green;
+                self.last_avg_blue = self.avg_blue;
             }
         }
     }
 }
 
 impl eframe::App for ColorClickerApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // 返回动态背景清除色，与 bg_opacity 同步
+        let alpha = self.config.bg_opacity as f32 / 100.0;
+        [0.0, 0.0, 0.0, alpha]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 处理键盘输入调节阈值
+        // 设置全局视觉样式，支持可调节透明度
+        let alpha = (self.config.bg_opacity as f32 * 2.55) as u8;
+        let fill_color = if self.config.bg_opacity == 0 {
+            egui::Color32::TRANSPARENT
+        } else {
+            egui::Color32::from_black_alpha(alpha)
+        };
+
+        // 直接修改全局样式，确保彻底覆盖
+        ctx.style_mut(|style| {
+            let visuals = &mut style.visuals;
+            visuals.panel_fill = fill_color;
+            visuals.window_fill = fill_color;
+            visuals.extreme_bg_color = fill_color;
+            visuals.faint_bg_color = fill_color;
+            visuals.window_shadow = egui::Shadow::NONE;
+            visuals.popup_shadow = egui::Shadow::NONE;
+            // 确保非交互状态的背景也透明
+            style.visuals.widgets.noninteractive.bg_fill = fill_color;
+            style.visuals.widgets.noninteractive.weak_bg_fill = fill_color;
+        });
+
+        // 处理键盘输入调节阈值和透明度
         ctx.input(|i| {
-            if i.key_pressed(egui::Key::ArrowUp) {
-                self.config.color_ratio = (self.config.color_ratio + 0.01).min(1.0);
-            }
-            if i.key_pressed(egui::Key::ArrowDown) {
-                self.config.color_ratio = (self.config.color_ratio - 0.01).max(0.0);
+            if i.modifiers.ctrl {
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    self.config.bg_opacity = self.config.bg_opacity.saturating_add(1).min(100);
+                    println!("[UI] Transparency adjusted: {}%", self.config.bg_opacity);
+                }
+                if i.key_pressed(egui::Key::ArrowDown) {
+                    self.config.bg_opacity = self.config.bg_opacity.saturating_sub(1);
+                    println!("[UI] Transparency adjusted: {}%", self.config.bg_opacity);
+                }
+            } else {
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    self.config.color_ratio = (self.config.color_ratio + 0.01).min(1.0);
+                }
+                if i.key_pressed(egui::Key::ArrowDown) {
+                    self.config.color_ratio = (self.config.color_ratio - 0.01).max(0.0);
+                }
             }
         });
 
@@ -207,14 +294,15 @@ impl eframe::App for ColorClickerApp {
             }
         }
 
-        // 执行检测和点击
-        self.detect_and_click(ctx);
+        // 异步检测流
+        self.handle_detection_results();
+        self.start_async_detection(ctx);
 
         // 创建主体面板
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(egui::Color32::TRANSPARENT)
+                    .fill(fill_color)
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 0)))
                     .inner_margin(egui::Margin::symmetric(6.0, 4.0))
                     .rounding(4.0),
@@ -257,47 +345,36 @@ impl eframe::App for ColorClickerApp {
 
                     // 2. 指标区域
                     ui.vertical_centered(|ui| {
-                        // 阈值控制显示
                         ui.horizontal(|ui| {
-                            ui.add_space(ui.available_width() / 2.0 - 25.0); // 辅助居中
-                            ui.spacing_mut().item_spacing.x = 2.0;
+                            ui.add_space(ui.available_width() / 2.0 - 35.0); // 居中辅助
+                            ui.spacing_mut().item_spacing.x = 1.0;
                             ui.label(
                                 egui::RichText::new("THR:")
                                     .size(10.0)
                                     .color(egui::Color32::LIGHT_GRAY),
                             );
+
+                            // 阈值 / 实际值
+                            let ratio_color = if self.blue_ratio >= self.config.color_ratio {
+                                egui::Color32::from_rgb(100, 200, 255) // 达标色
+                            } else {
+                                egui::Color32::from_rgb(255, 215, 0) // 默认金黄色
+                            };
+
                             ui.label(
-                                egui::RichText::new(format!("{:.2}", self.config.color_ratio))
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(255, 215, 0))
-                                    .strong(),
-                            );
-                            ui.label(
-                                egui::RichText::new("+/-")
-                                    .size(9.0)
-                                    .color(egui::Color32::DARK_GRAY),
-                            );
-                        });
-
-                        ui.add_space(2.0);
-
-                        // 核心数据：当前占比
-                        let ratio_color = if self.blue_ratio >= self.config.color_ratio {
-                            egui::Color32::from_rgb(100, 200, 255)
-                        } else {
-                            egui::Color32::from_rgb(200, 200, 200)
-                        };
-
-                        ui.label(
-                            egui::RichText::new(format!("{:.1}%", self.blue_ratio * 100.0))
-                                .size(20.0)
+                                egui::RichText::new(format!(
+                                    "{:.2}/{:.2}",
+                                    self.blue_ratio, self.config.color_ratio
+                                ))
+                                .size(11.0)
                                 .color(ratio_color)
                                 .strong(),
-                        );
+                            );
+                        });
                     });
 
                     ui.add_space(2.0);
-                    
+
                     // 3. 视觉预览框 (准星模式：大小由 config.box_size 决定)
                     let area_size = egui::Vec2::new(
                         self.config.box_size.width as f32,
@@ -308,11 +385,8 @@ impl eframe::App for ColorClickerApp {
                     // 计算准星的逻辑中心位置（Window-local 坐标系）
                     let screen_center = ui.ctx().screen_rect().center();
                     let logical_center = egui::pos2(screen_center.x, screen_center.y + 15.0);
-                    
-                    let center_rect = egui::Rect::from_center_size(
-                        logical_center,
-                        area_size,
-                    );
+
+                    let center_rect = egui::Rect::from_center_size(logical_center, area_size);
 
                     let stroke_color = if self.blue_ratio >= self.config.color_ratio {
                         egui::Color32::YELLOW
@@ -331,11 +405,17 @@ impl eframe::App for ColorClickerApp {
                     let cross_size = 6.0; // 稍微拉长一点
                     let cross_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0));
                     ui.painter().line_segment(
-                        [center - egui::vec2(cross_size, 0.0), center + egui::vec2(cross_size, 0.0)],
+                        [
+                            center - egui::vec2(cross_size, 0.0),
+                            center + egui::vec2(cross_size, 0.0),
+                        ],
                         cross_stroke,
                     );
                     ui.painter().line_segment(
-                        [center - egui::vec2(0.0, cross_size), center + egui::vec2(0.0, cross_size)],
+                        [
+                            center - egui::vec2(0.0, cross_size),
+                            center + egui::vec2(0.0, cross_size),
+                        ],
                         cross_stroke,
                     );
 

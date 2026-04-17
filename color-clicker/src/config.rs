@@ -9,6 +9,7 @@ pub struct Config {
     pub color_ratio: f64,
     pub detection_interval_ms: u64,
     pub box_size: BoxSize,
+    pub bg_opacity: u8,
     pub click_delay_ms: u64,
     pub window_pos: WindowPos,
 }
@@ -53,7 +54,6 @@ impl Config {
         fs::write(path, config_str)?;
         Ok(())
     }
-
 }
 
 impl Default for Config {
@@ -63,9 +63,10 @@ impl Default for Config {
             color_ratio: 0.5,
             detection_interval_ms: 500,
             box_size: BoxSize {
-                width: 40,
-                height: 20,
+                width: 70,
+                height: 35,
             },
+            bg_opacity: 50,
             click_delay_ms: 5000,
             window_pos: WindowPos::default(),
         }

@@ -5,7 +5,7 @@
 ; ==========================================================
 !define APP_NAME "Color Clicker"
 !define EXE_NAME "color-clicker.exe"
-!define VERSION "0.3.0" ; 这里可以后续通过参数传入
+!define VERSION "0.4.0" ; 这里可以后续通过参数传入
 
 Name "${APP_NAME}"
 OutFile "color-clicker-setup.exe"
